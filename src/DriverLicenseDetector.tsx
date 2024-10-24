@@ -39,7 +39,6 @@ const DriverLicenseDetector = () => {
     const workerEvents = () => {
         documentWorker.onmessage = (event) => {
             const { type, prediction, error } = event.data;
-            console.log(type)
             if (type === 'modelLoaded') {
                 setLoading(false);
             } else if (type === 'prediction') {
