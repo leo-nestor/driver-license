@@ -162,35 +162,39 @@ const DriverLicenseDetector = () => {
         setCurrentDeviceId(devices[nextIndex]?.deviceId);
     };
 
-    // const boxStyles = () => {
-    //     if (!videoRef.current || !canvasRef.current) return {};
+    const boxStyles = () => {
+        if (!videoRef.current || !canvasRef.current) {
+            return {};  // Return an empty object when refs are not ready
+        }
 
-    //     const video = videoRef.current;
+        const video = videoRef.current;
 
-    //     const videoW = video.clientWidth;  // Obtener el ancho real del video mostrado en pantalla
-    //     const videoH = video.clientHeight;
+        const videoW = video.clientWidth;  // Get the actual width of the video on the screen
+        const videoH = video.clientHeight;
 
-    //     const { y_min, x_min, y_max, x_max } = prediction;
+        const { y_min, x_min, y_max, x_max } = prediction;
 
-    //     // Escala las coordenadas de predicción según las dimensiones reales del video
-    //     const scaleX = videoW / video.videoWidth;
-    //     const scaleY = videoH / video.videoHeight;
+        // Scaling the prediction coordinates to the actual video size
+        const scaleX = videoW / video.videoWidth;
+        const scaleY = videoH / video.videoHeight;
 
-    //     const top = y_min * scaleY;
-    //     const left = x_min * scaleX;
-    //     const boxWidth = (x_max - x_min) * scaleX;
-    //     const boxHeight = (y_max - y_min) * scaleY;
+        const top = y_min * scaleY;
+        const left = x_min * scaleX;
+        const boxWidth = (x_max - x_min) * scaleX;
+        const boxHeight = (y_max - y_min) * scaleY;
 
-    //     return {
-    //         position: 'absolute',
-    //         top: `${top}px`,
-    //         left: `${left}px`,
-    //         width: `${boxWidth}px`,
-    //         height: `${boxHeight}px`,
-    //         border: '2px solid green',
-    //         zIndex: 2,
-    //     };
-    // };
+        // Ensure valid style values for position, top, left, width, height, etc.
+        return {
+            position: 'absolute' as const,  // Explicitly cast to expected string values
+            top: `${top}px`,
+            left: `${left}px`,
+            width: `${boxWidth}px`,
+            height: `${boxHeight}px`,
+            border: '2px solid green',
+            zIndex: 2,
+        };
+    };
+
 
 
     if (loading) return <div>Loading model...</div>;
@@ -201,7 +205,7 @@ const DriverLicenseDetector = () => {
             <div style={{ position: 'relative', display: 'inline-block' }}>
                 <video ref={videoRef} muted playsInline autoPlay style={{ maxWidth: '100%' }} />
                 <div ref={boundingRef} style={{ position: 'absolute', top: '50%', left: '50%', width: '65%', height: `${VIDEO_HEIGHT_PERCENTAGE * 100}%`, transform: 'translate(-50%, -50%)', border: '3px dashed', borderColor: prediction.currentScore >= CONFIDENCE_THRESHOLD && isInGrayArea ? 'green' : 'gray', backgroundColor: 'rgba(128, 128, 128, 0.1)', zIndex: 1 }} />
-                {/* {prediction.currentScore >= CONFIDENCE_THRESHOLD && <div style={boxStyles()} />} */}
+                {prediction.currentScore >= CONFIDENCE_THRESHOLD && <div style={boxStyles()} />}
                 <canvas ref={canvasRef} style={{ display: 'none' }} />
                 <div style={{ position: 'absolute', color: isInGrayArea ? 'green' : 'red' }}>{userMessage}</div>
             </div>
@@ -210,7 +214,7 @@ const DriverLicenseDetector = () => {
             {prediction.currentScore}
             <br></br>
             prediction time: {prediction.totalTime}ms
-            <button style={{ backgroundColor: 'yellow', fontSize: '20px', padding: '10px', width: '100%' }} onClick={switchCamera}>Switch Camera</button>
+            <button style={{ backgroundColor: 'red', fontSize: '20px', padding: '10px', width: '100%' }} onClick={switchCamera}>Switch Camera</button>
         </>
     );
 };

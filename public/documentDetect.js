@@ -8,7 +8,7 @@ const CONFIDENCE_THRESHOLD = 0.72;
 const MODEL_SIZE = 640;
 
 const loadModel = async () => {
-    const modelUrl = '/models/driver-license-over-yolo/model.json';
+    const modelUrl = '/models/driver-license-mobilenet/model.json';
     try {
         model = await tf.loadGraphModel(modelUrl);
         postMessage({ type: 'modelLoaded' });
@@ -76,6 +76,7 @@ onmessage = async (e) => {
             const batched = resized.expandDims(0).toFloat().div(tf.scalar(255));
 
             const predictions = await model.executeAsync(batched);
+            console.log(JSON.stringify(predictions))
             const boxesAndScores = predictions.arraySync()[0];
             const [x_min, y_min, x_max, y_max, currentScore] = boxesAndScores[0];
 
@@ -111,6 +112,7 @@ onmessage = async (e) => {
             }
 
         } catch (error) {
+            console.log(error)
             postMessage({ type: 'error', error: "Prediction failed." });
         }
     } else if (type === 'load_model') {
