@@ -8,7 +8,7 @@ const CONFIDENCE_THRESHOLD = 0.72;
 const MODEL_SIZE = 640;
 
 const loadModel = async () => {
-    const modelUrl = '/models/driver-license-mobilenet/model.json';
+    const modelUrl = '/models/driver-license-over-yolo/model.json';
     try {
         model = await tf.loadGraphModel(modelUrl);
         postMessage({ type: 'modelLoaded' });
@@ -70,19 +70,27 @@ onmessage = async (e) => {
     if (type === 'predict' && model) {
         try {
             const startTime = performance.now(); // Start measuring time
-
+    
             const img = tf.browser.fromPixels(imageData);
-            const resized = tf.image.resizeBilinear(img, [MODEL_SIZE, MODEL_SIZE]);
-            const batched = resized.expandDims(0).toFloat().div(tf.scalar(255));
 
-            const predictions = await model.executeAsync(batched);
-            console.log(JSON.stringify(predictions))
-            const boxesAndScores = predictions.arraySync()[0];
-            const [x_min, y_min, x_max, y_max, currentScore] = boxesAndScores[0];
+            let input = tf.image.resizeBilinear(tf.browser.fromPixels(imageData), [MODEL_SIZE, MODEL_SIZE]);
+            input = tf.cast(tf.expandDims(input), 'float32');
+    
+            // Run the inference and get the output tensors.
+            let predictions = await model.predict(input);
+            console.log(predictions); // Log the extracted scalar values
+            // console.log(predictions); // Log the predictions for debugging
 
-            img.dispose();
-            resized.dispose();
-            batched.dispose();
+            // Extract the scalar values from the tensors
+            const boxesAndScores = predictions.map(tensor => tensor.dataSync()[0]); // Use dataSync to extract values
+
+            // Assuming the output order is: [x_min, y_min, x_max, y_max]
+            const [x_min, y_min, x_max, y_max] = boxesAndScores; // Destructure the array to get the coordinates
+            const currentScore = boxesAndScores[3]; // If your score is also in the output, adjust accordingly
+
+            // img.dispose();
+            // resized.dispose();
+            // batched.dispose();
 
             const boxCheck = isBoxInsideGrayArea(videoWidth, videoHeight, boxWidth, boxHeight, { x_min, y_min, x_max, y_max, currentScore });
 
@@ -90,7 +98,7 @@ onmessage = async (e) => {
 
             const predictionData = {
                 x_min, y_min, x_max, y_max,
-                currentScore: parseFloat(currentScore.toFixed(2)),
+                currentScore: parseFloat(currentScore.toFixed(2)), // Ensure score is formatted correctly
                 totalTime: totalTime, // Return combined time as a single value
                 ...boxCheck
             };
@@ -112,10 +120,12 @@ onmessage = async (e) => {
             }
 
         } catch (error) {
-            console.log(error)
+            console.log(error);
             postMessage({ type: 'error', error: "Prediction failed." });
         }
     } else if (type === 'load_model') {
         tf.setBackend('wasm').then(() => loadModel());
     } 
 };
+
+

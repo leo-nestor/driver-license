@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 const CONFIDENCE_THRESHOLD = 0.72;
-const PREDICTION_DELAY = 1500;
+const PREDICTION_DELAY = 300;
 const VIDEO_HEIGHT_PERCENTAGE = 0.85;
 
 const documentWorker = new Worker('/documentDetect.js');
@@ -40,6 +40,7 @@ const DriverLicenseDetector = () => {
         documentWorker.onmessage = (event) => {
             const { type, prediction, error } = event.data;
             if (type === 'modelLoaded') {
+                requestAnimationFrame(captureFrame)
                 setLoading(false);
             } else if (type === 'prediction') {
                 setPrediction(prediction);
@@ -51,7 +52,6 @@ const DriverLicenseDetector = () => {
                 setUserMessage(prediction.message);
             } else if (type === 'error') setError(error);
 
-            requestAnimationFrame(captureFrame)
         };
     };
 
@@ -134,7 +134,7 @@ const DriverLicenseDetector = () => {
             });
         }
 
-        // setTimeout(() => requestAnimationFrame(captureFrame), PREDICTION_DELAY);
+        setTimeout(() => requestAnimationFrame(captureFrame), PREDICTION_DELAY);
     };
 
     useEffect(() => {
