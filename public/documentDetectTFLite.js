@@ -1,134 +1,177 @@
 /* eslint-disable no-undef */
-importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs');
-importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core');
-importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu');
-importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.8/dist/tf-tflite.min.js');
-importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm');
+importScripts("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs");
+importScripts("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core");
+importScripts("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu");
+// importScripts("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm");
+importScripts("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.8/dist/tf-tflite.min.js");
 
-let model = null;
+const MODEL_PATH = '/models/mobilenet-tflite/detect.tflite';
+let objectDetector;
 
-const CONFIDENCE_THRESHOLD = 0.72;
-const MODEL_SIZE = 640;
+async function loadModel() {
+    const worker = new Worker('/loadTFLite.js');
+    worker.postMessage('Ping from parent');
 
-const loadModel = async () => {
-    const modelUrl = '/models/driver-license-over-yolo/model.json';
     try {
-        model = await tf.loadGraphModel(modelUrl);
-        postMessage({ type: 'modelLoaded' });
-    } catch (error) {
-        postMessage({ type: 'error', error: "Failed to load model." });
-    }
-};
-
-// Function to calculate if the box is inside the gray area
-const isBoxInsideGrayArea = (videoW, videoH, boxWidth, boxHeight, prediction) => {
-    const { y_min, x_min, y_max, x_max, currentScore } = prediction;
-
-    if (parseFloat(currentScore) < CONFIDENCE_THRESHOLD) {
-        return { isInside: false, isSizeValid: false };
-    }
-
-    const scaleX = videoW / MODEL_SIZE;
-    const scaleY = videoH / MODEL_SIZE;
-
-    const scaledX_min = x_min * scaleX;
-    const scaledY_min = y_min * scaleY;
-    const scaledX_max = x_max * scaleX;
-    const scaledY_max = y_max * scaleY;
-
-    const margin = 0.15;
-    const offsetMargin = 0.10;
-
-    const grayAreaTop = (videoH - boxHeight) / 2;
-    const grayAreaLeft = (videoW - boxWidth) / 2;
-    const grayAreaBottom = grayAreaTop + boxHeight;
-    const grayAreaRight = grayAreaLeft + boxWidth;
-
-    const allowedTop = grayAreaTop - boxHeight * offsetMargin;
-    const allowedLeft = grayAreaLeft - boxWidth * offsetMargin;
-    const allowedBottom = grayAreaBottom + boxHeight * (offsetMargin / 2);
-    const allowedRight = grayAreaRight + boxWidth * (offsetMargin / 2);
-
-    const isInside =
-        scaledY_min >= allowedTop &&
-        scaledY_max <= allowedBottom &&
-        scaledX_min >= allowedLeft &&
-        scaledX_max <= allowedRight;
-
-    const predictedWidth = scaledX_max - scaledX_min;
-    const predictedHeight = scaledY_max - scaledY_min;
-
-    const minWidth = boxWidth * (1 - margin);
-    const minHeight = boxHeight * (1 - margin);
-
-    const isSizeValid = predictedWidth >= minWidth && predictedHeight >= minHeight;
-
-    return { isInside, isSizeValid };
-};
-
-// Receive messages from the main thread
-onmessage = async (e) => {
-    const { type, imageData, videoWidth, videoHeight, boxWidth, boxHeight } = e.data;
-
-    if (type === 'predict' && model) {
-        try {
-            const startTime = performance.now(); // Start measuring time
-    
-            const img = tf.browser.fromPixels(imageData);
-
-            let input = tf.image.resizeBilinear(tf.browser.fromPixels(imageData), [MODEL_SIZE, MODEL_SIZE]);
-            input = tf.cast(tf.expandDims(input), 'float32');
-    
-            // Run the inference and get the output tensors.
-            let predictions = await model.predict(input);
-            console.log(predictions); // Log the extracted scalar values
-            // console.log(predictions); // Log the predictions for debugging
-
-            // Extract the scalar values from the tensors
-            const boxesAndScores = predictions.map(tensor => tensor.dataSync()[0]); // Use dataSync to extract values
-
-            // Assuming the output order is: [x_min, y_min, x_max, y_max]
-            const [x_min, y_min, x_max, y_max] = boxesAndScores; // Destructure the array to get the coordinates
-            const currentScore = boxesAndScores[3]; // If your score is also in the output, adjust accordingly
-
-            // img.dispose();
-            // resized.dispose();
-            // batched.dispose();
-
-            const boxCheck = isBoxInsideGrayArea(videoWidth, videoHeight, boxWidth, boxHeight, { x_min, y_min, x_max, y_max, currentScore });
-
-            const totalTime = performance.now() - startTime; // Total time for prediction + box check
-
-            const predictionData = {
-                x_min, y_min, x_max, y_max,
-                currentScore: parseFloat(currentScore.toFixed(2)), // Ensure score is formatted correctly
-                totalTime: totalTime, // Return combined time as a single value
-                ...boxCheck
-            };
-
-            if (boxCheck.isInside && boxCheck.isSizeValid) {
-                postMessage({ type: 'prediction', prediction: predictionData });
-            } else {
-                postMessage({
-                    type: 'prediction_failed',
-                    prediction: {
-                        ...predictionData,
-                        message: !boxCheck.isSizeValid && boxCheck.isInside
-                            ? "Bring the document closer"
-                            : !boxCheck.isInside && boxCheck.isSizeValid
-                                ? "Place document inside the rectangle"
-                                : ''
-                    }
-                });
-            }
-
-        } catch (error) {
-            console.log(error);
-            postMessage({ type: 'error', error: "Prediction failed." });
+        // Now load the model
+        if (!objectDetector) {
+            // tflite.setWasmPath('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.8/wasm/')
+            // objectDetector = await tflite.loadTFLiteModel(MODEL_PATH);
         }
-    } else if (type === 'load_model') {
-        tf.setBackend('wasm').then(() => loadModel());
-    } 
+        // Notify the main thread that the model has been loaded
+        // postMessage({ type: 'MODEL_LOADED' });
+    } catch (e) {
+        console.error("Error loading model:", e);
+    }
+}
+
+async function preprocessFrame(data) {
+    const inputTensor = tf.tidy(() => {
+        const imageTensor = tf.browser.fromPixels(data).resizeBilinear([320, 320]);
+        const normalizedTensor = imageTensor.asType('float32').div(127.5).sub(1).expandDims(0);
+        return normalizedTensor;
+    });
+    return inputTensor;
+}
+
+async function detect(data) {
+    if (!objectDetector) return;
+    const inputTensor = await preprocessFrame(data);
+
+    let predictions;
+    try {
+        const inputName = 'serving_default_input:0';
+        predictions = await objectDetector.predict({ [inputName]: inputTensor });
+        tf.dispose(inputTensor);
+    } catch (error) {
+        console.error('Error during model prediction:', error);
+        return;
+    }
+
+    const boxes = predictions['StatefulPartitionedCall:3']?.dataSync() || [];
+    const scores = predictions['StatefulPartitionedCall:1']?.dataSync() || [];
+
+    postMessage({ type: 'PREDICTION', boxes, scores });
+}
+
+// Load the model on worker initialization
+loadModel();
+
+// Listen for messages from the main thread
+onmessage = async (event) => {
+    if (event.data.type === 'DETECT') {
+        console.log("recibo on detect")
+        await detect(event.data.frame);
+    }
 };
 
+
+const CONFIDENCE_THRESHOLD = 0.999990;  // Minimum confidence threshold
+
+async function preprocessFrame(video) {
+    return tf.tidy(() => {
+        const inputTensor = tf.image.resizeBilinear(tf.browser.fromPixels(video), [320, 320]); // Resize to 320x320
+        const normalizedTensor = inputTensor
+            .asType('float32') // Ensure the data type is float32
+            .div(127.5) // Normalize to range [-1, 1]
+            .sub(1)
+            .expandDims(0); // Add batch dimension
+
+        return normalizedTensor;
+    });
+}
+
+
+async function detect(videoElement) {
+    if (!objectDetector) {
+        objectDetector = await tflite.loadTFLiteModel(MODEL_PATH);
+    }
+    const inputTensor = await preprocessFrame(videoElement); // Ensure videoElement is passed correctly
+    const boxesContainer = document.querySelector(".boxes-container");
+    boxesContainer.innerHTML = "";
+
+    let predictions;
+    try {
+        const inputName = 'serving_default_input:0'; // This is the expected input name
+        predictions = await objectDetector.predict({ [inputName]: inputTensor });
+    } catch (error) {
+        console.error('Error during model prediction:', error);
+        return;
+    }
+
+    const boxes = predictions['StatefulPartitionedCall:3']?.dataSync() || [];
+    const scores = predictions['StatefulPartitionedCall:1']?.dataSync() || [];
+
+    if (!predictions) {
+        console.error('Predictions are undefined');
+        return;
+    }
+
+    
+    // Proceed with drawing boxes if predictions are valid
+    if (boxes && scores) {
+        // I'm only insterested in the first detection
+        const frameWidth = videoElement.videoWidth; // Use video variable for width
+        const frameHeight = videoElement.videoHeight; // Use video variable for height
+        const score = scores[0];
+        const ymin = boxes[0] * frameHeight;
+        const xmin = boxes[1] * frameWidth;
+        const ymax = boxes[2] * frameHeight;
+        const xmax = boxes[3] * frameWidth;
+
+        const title = document.querySelector(".m-title");
+        const container = document.createElement("div");
+    container.textContent = "v10 - " + score.toString().slice(0,9);
+    title.replaceChildren(container)
+         // Check all detections
+            if (score > CONFIDENCE_THRESHOLD) { // Set a confidence threshold
+                const boxContainer = drawBoundingBoxes(
+                    xmin,
+                    ymin,
+                    xmax - xmin,
+                    ymax - ymin,
+                    'document',
+                    score,
+                    'red'
+                );
+                boxesContainer.appendChild(boxContainer);
+            }
+        
+    } else {
+        console.error('Boxes, classes, or scores are undefined');
+    }
+
+    requestAnimationFrame(() => detect(videoElement)); // Call detect recursively with videoElement
+}
+
+
+// Draw bounding boxes for top 'N' detections.
+function drawBoundingBoxes(left, top, width, height, className, score, color) {
+    const container = document.createElement("div");
+    container.classList.add("box-container");
+
+    const box = document.createElement("div");
+    box.classList.add("box");
+    box.style.borderColor = color;
+    box.style.borderWidth = "4px";
+    container.appendChild(box);
+
+    const label = document.createElement("div");
+    label.classList.add("label");
+    label.style.backgroundColor = color;
+    label.textContent = `${className} (${score.toFixed(2)})`;
+    container.appendChild(label);
+
+    const inputVideoElement = document.getElementById("input-video");
+    const vidRect = inputVideoElement.getBoundingClientRect();
+    const offsetX = vidRect.left;
+    const offsetY = vidRect.top;
+
+    container.style.left = `${left + offsetX - 1}px`;
+    container.style.top = `${top + offsetY}px`;
+    box.style.width = `${width + 1}px`;
+    box.style.height = `${height + 1}px`;
+
+    return container;
+}
 

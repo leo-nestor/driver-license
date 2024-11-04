@@ -1,7 +1,6 @@
 
 const MODEL_PATH = '/models/mobilenet-tflite/detect.tflite';
 const CONFIDENCE_THRESHOLD = 0.999990;  // Minimum confidence threshold
-const MODEL_SIZE = 320;
 
 let video_devices;
 
@@ -37,7 +36,6 @@ async function preprocessFrame(video) {
             .sub(1)
             .expandDims(0); // Add batch dimension
 
-        console.log('Input tensor shape after preprocessing:', normalizedTensor.shape);
         return normalizedTensor;
     });
 }
@@ -63,8 +61,6 @@ async function detect(videoElement) {
     const boxes = predictions['StatefulPartitionedCall:3']?.dataSync() || [];
     const scores = predictions['StatefulPartitionedCall:1']?.dataSync() || [];
 
-    console.log(scores, boxes)
-    
     if (!predictions) {
         console.error('Predictions are undefined');
         return;
