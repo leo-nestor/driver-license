@@ -1,58 +1,97 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-const MODEL_PATH = '/models/mobilenet-tflite/detect.tflite';
-const CONFIDENCE_THRESHOLD = 0.999990;  // Minimum confidence threshold
+const PREDICTION_DELAY = 200;
+const CONFIDENCE_THRESHOLD = 0.95;  // Minimum confidence threshold
+const VIDEO_HEIGHT_PERCENTAGE = 0.80;
+
+type Prediction = {
+    confidence: number,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    isInside: boolean,
+    isValidSize: boolean,
+}
+
 
 function ObjectDetection() {
-    const videoRef = useRef(null);
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const boundingRef = useRef<HTMLDivElement>(null);
     const boxesContainerRef = useRef(null);
-    const titleRef = useRef(null);
-    const [objectDetector, setObjectDetector] = useState(null);
+    const workerRef = useRef<Worker | null>(null);
+    const [worker, setWorker] = useState<Worker>();
+    const [prediction, setPrediction] = useState<Prediction>({
+        confidence: 0,
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+        isInside: false,
+        isValidSize: false,
+        // message: '',
+        // totalTime: 0,
+    });
+
+
 
     useEffect(() => {
         const loadModel = async () => {
-            // @ts-expect-error error
+            const newWorker = new Worker(new URL(`./loadTFLite.js`, import.meta.url));
+            workerRef.current = newWorker;
+            newWorker.postMessage({ type: "LOAD_MODEL" });
+            newWorker.onmessage = (event) => {
+                const { type } = event.data;
+                if (type === 'MODEL_LOADED') {
+                    setWorker(worker);
+                    startCamera();
+                } else if (type === 'PREDICTION') {
+                    processDetections(event.data.values)
+                } else if (type === 'PREDICTION_FAILED') {
 
-            const model = await tflite.loadTFLiteModel(MODEL_PATH);
-            setObjectDetector(model);
+                }
+
+            };
         };
 
         loadModel();
-        startCamera();
 
         return () => {
-            // @ts-expect-error error
-            if (videoRef.current && videoRef.current.srcObject) {
-                // @ts-expect-error error
+            worker?.terminate();
+            workerRef.current?.terminate();
+            if (videoRef.current && videoRef.current.srcObject instanceof MediaStream) {
+                // eslint-disable-next-line react-hooks/exhaustive-deps
                 const stream = videoRef.current.srcObject;
-                // @ts-expect-error error
                 stream.getTracks().forEach(track => track.stop());
             }
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        requestAnimationFrame(sendFrameToWorker);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [workerRef])
 
     const startCamera = async () => {
         try {
             const videoDevices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'videoinput');
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
+                    facingMode: 'environment',
+                    width: { ideal: 640 },
+                    height: { ideal: 640 },
                     deviceId: videoDevices.find(d => d.label.toLowerCase().includes('back'))?.deviceId || videoDevices[0]?.deviceId
                 }
             });
 
             if (videoRef.current) {
-                // @ts-expect-error error
-
                 videoRef.current.srcObject = stream;
-
-                // Wait for metadata to load before playing the video
-                // @ts-expect-error error
 
                 videoRef.current.onloadedmetadata = () => {
                     // @ts-expect-error error
-
                     videoRef.current.play();
-                    detect(videoRef.current);
                 };
             }
         } catch (error) {
@@ -60,77 +99,60 @@ function ObjectDetection() {
         }
     };
 
-    // @ts-expect-error error
-    const preprocessFrame = async (video) => {
-        // @ts-expect-error error
+    const sendFrameToWorker = () => {
+        if (!videoRef.current || !canvasRef.current || !workerRef) return;
 
-        return tf.tidy(() => {
-            // @ts-expect-error error
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d', { willReadFrequently: true });
 
-            const inputTensor = tf.image.resizeBilinear(tf.browser.fromPixels(video), [320, 320]);
-            const normalizedTensor = inputTensor
-                .asType('float32')
-                .div(127.5)
-                .sub(1)
-                .expandDims(0);
-            return normalizedTensor;
-        });
+        if (ctx && videoRef.current && canvas && boundingRef.current) {
+            const videoWidth = videoRef.current.clientWidth;
+            const videoHeight = videoRef.current.clientHeight;
+
+            // Set canvas dimensions to match the video
+            canvas.width = videoWidth;
+            canvas.height = videoHeight;
+
+            ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            if (workerRef) {
+                workerRef.current?.postMessage({
+                    type: 'DETECT',
+                    imageData,
+                    videoWidth,
+                    videoHeight,
+                    boxWidth: boundingRef.current.clientWidth + 6,
+                    boxHeight: boundingRef.current.clientHeight + 6
+                });
+            }
+        }
+
+        setTimeout(() => requestAnimationFrame(sendFrameToWorker), PREDICTION_DELAY);
+
     };
-    // @ts-expect-error error
-    const detect = async (videoElement) => {
-        console.log("detecting")
-        if (!objectDetector) return;
 
-        const inputTensor = await preprocessFrame(videoElement);
+    const processDetections = (values: Prediction) => {
+        // TODO: remove this if after development
         if (boxesContainerRef.current) {
-            // @ts-expect-error error
+            //@ts-expect-error error
             boxesContainerRef.current.innerHTML = "";
         }
 
-        let predictions;
-        try {
-            const inputName = 'serving_default_input:0';
-            // @ts-expect-error error
-            predictions = await objectDetector.predict({ [inputName]: inputTensor });
-        } catch (error) {
-            console.error('Error during model prediction:', error);
-            return;
-        }
-
-        const boxes = predictions['StatefulPartitionedCall:3']?.dataSync() || [];
-        const scores = predictions['StatefulPartitionedCall:1']?.dataSync() || [];
-
-        if (boxes && scores && boxes.length > 0) {
-            const frameWidth = videoElement.videoWidth;
-            const frameHeight = videoElement.videoHeight;
-            const score = scores[0];
-            const ymin = boxes[0] * frameHeight;
-            const xmin = boxes[1] * frameWidth;
-            const ymax = boxes[2] * frameHeight;
-            const xmax = boxes[3] * frameWidth;
-
-            if (titleRef.current) {
-                // @ts-expect-error error
-
-                titleRef.current.textContent = `v10 - ${score.toString().slice(0, 9)}`;
+        if (values) {
+            setPrediction(values);
+            // TODO: remove this if after development
+            if (boxesContainerRef.current && values.confidence > CONFIDENCE_THRESHOLD) {
+                const boxContainer = drawBoundingBoxes(values.left, values.top, values.width, values.height, 'document', values.confidence, 'red');
+                //@ts-expect-error error
+                boxesContainerRef.current.appendChild(boxContainer);
             }
 
-            if (score > CONFIDENCE_THRESHOLD) {
-                const boxContainer = drawBoundingBoxes(xmin, ymin, xmax - xmin, ymax - ymin, 'document', score, 'red');
-                if (boxesContainerRef.current) {
-                    // @ts-expect-error error
-
-                    boxesContainerRef.current.appendChild(boxContainer);
-                }
-            }
-        } else {
-            console.error('Boxes or scores are undefined');
         }
-
-        requestAnimationFrame(() => detect(videoElement));
     };
 
-    // @ts-expect-error error
+    //@ts-expect-error error
+    // todo: this function can be removed / commented after development
     const drawBoundingBoxes = (left, top, width, height, className, score, color) => {
         const container = document.createElement("div");
         container.classList.add("box-container");
@@ -148,7 +170,6 @@ function ObjectDetection() {
         container.appendChild(label);
 
         if (videoRef.current) {
-            // @ts-expect-error error
             const vidRect = videoRef.current.getBoundingClientRect();
             const offsetX = vidRect.left;
             const offsetY = vidRect.top;
@@ -163,11 +184,24 @@ function ObjectDetection() {
     };
 
     return (
-        <div className="object-detection">
-            <div className="m-title" ref={titleRef}></div>
-            <video ref={videoRef} className="video" autoPlay playsInline muted></video>
-            <div className="boxes-container" ref={boxesContainerRef}></div>
-        </div>
+        <>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+                <div style={{ position: 'absolute', color: 'red', fontWeight: 700 }}>
+                    {/* TODO: remove this after development */}
+                    {`v10 - ${prediction.confidence.toString().slice(0, 9)} isInside: ${prediction.isInside} isValidSize: ${prediction.isValidSize}`}
+                </div>
+                <video ref={videoRef} className="video" autoPlay playsInline muted style={{ maxWidth: '100%' }}></video>
+                <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
+                <div ref={boundingRef} style={{
+                    position: 'absolute', top: '50%', left: '50%', width: '65%', opacity: 1, height: `${VIDEO_HEIGHT_PERCENTAGE * 100}%`, transform: 'translate(-50%, -50%)', border: '3px dashed', borderColor: prediction.isInside && prediction.isValidSize ? 'green' : 'gray',
+                    backgroundColor: 'rgba(128, 128, 128, 0.1)',
+                    boxShadow: '0px 0px 20px 5px rgba(0, 0, 0, 0.3)',
+                    zIndex: 1,
+                }} />
+                {/* TODO: remove this after development */}
+                <div className="boxes-container" ref={boxesContainerRef}></div>
+            </div>
+        </>
     );
 }
 
